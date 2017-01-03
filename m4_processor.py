@@ -13,20 +13,20 @@ class Block:
 	CHAR_EOF = "-1"   # character return on EOF 
 	CHAR_MACRO = "-2" # character return for MACRO token 
 
-	def __init__(self, type, arg):
+	def __init__(self, type, arg1, arg2 = None):
 		self.type = type
 		self.line = 0
 		self.offset = 0
 		self.start_of_input_line = False
 		if type == self.INPUT_FILE:
-			self.name = os.path.basename(arg)
-			self.content = self.read_file(arg)
+			self.name = arg1
+			self.content = self.read_file(arg2)
 		elif type == self.INPUT_STRING:
 			self.name = None
-			self.content = arg
+			self.content = arg1
 		elif type == self.INPUT_MACRO:
 			self.name = None
-			self.content = arg
+			self.content = arg1
 		else:
 			raise Exception("Unknown input block type %d" % type)
 
@@ -38,7 +38,7 @@ class Block:
 		if self.start_of_input_line:
 			self.start_of_input_line = False
 			self.line += 1
-			print("line: %d" % self.line)
+			#print("line: %d" % self.line)
 		# check end of content
 		if self.offset >= len(self.content):
 			return self.CHAR_EOF
@@ -84,8 +84,11 @@ class M4Parser:
 		# The number of the current call of expand_macro ().
 		self.macro_call_id = 0
 		# debug, trace
-		self.debug = True
+		self.debug = False
 		self.trace = True
+		# diversions ()
+		self.diversions = {}
+		self.current_diversion = 0;
 		# Init builtin macros
 		self.init_buitlin()
 	
@@ -112,8 +115,8 @@ class M4Parser:
 			return
 		print(msg)
 
-	def push_file(self, filename):
-		block = Block(Block.INPUT_FILE, filename)
+	def push_file(self, filename, filepath):
+		block = Block(Block.INPUT_FILE, filename, filepath)
 		self.stack.append(block) 
 
 	def push_string(self, string):
@@ -317,7 +320,7 @@ class M4Parser:
 
 	def process_file(self, filename):
 		filepath = self.search_file(filename)
-		self.push_file(filepath)
+		self.push_file(filename, filepath)
 		while True:
 			(token, line) = self.next_token()
 			if token.type == Token.TOKEN_EOF:
@@ -344,15 +347,14 @@ class M4Parser:
 		if prev_text is not None: # compose text without output
 			return prev_text + text
 		if not self.config['sync_output']:
-			sys.stdout.write(text)
-			sys.stdout.flush()
+			self.output_text(text)
 			return None
 		if self.start_of_output_line:
 			self.start_of_output_line = False
 			self.output_current_line += 1
 
 			if self.output_current_line != line:
-				sys.stdout.write("#line \"%d\"\n" % line)
+				self.output_text("#line \"%d\"\n" % line)
 				self.output_current_line = line
 		
 		for symbol in text:
@@ -361,9 +363,40 @@ class M4Parser:
 				self.output_current_line += 1
 			if symbol == '\n':
 				self.output_current_line = True
-			sys.stdout.write(symbol)
-		sys.stdout.flush()
+		self.output_text(text)
 		return None
+
+	def output_text(self, text):
+		if self.current_diversion < 0:
+			return
+		if self.current_diversion == 0:
+			sys.stdout.write(text)
+			sys.stdout.flush()
+			return
+		self.diversions[self.current_diversion] += text
+
+	def make_diversion(self, divnum):
+		if self.current_diversion == divnum:
+			return
+
+		self.current_diversion = divnum
+
+		if divnum <= 0:
+			return
+
+		if self.current_diversion not in self.diversions:
+			self.diversions[self.current_diversion] = ''
+		self.start_of_output_line = True
+		self.output_current_line = -1 
+
+	def undivert_all(self):
+		for divnum, text in self.diversions.items():
+			if divnum != self.current_diversion:
+				self.output_text(text)
+
+	def undivert(self, divnum):
+		if self.current_diversion in self.diversions:
+			self.output_text(self.diversions[self.current_diversion])
 
 	def expand_macro(self, macro):
 		block = self.current_block()
@@ -471,13 +504,16 @@ class M4Parser:
 		else:
 			return sep.join(real_arguments)
 
-	def search_file(self, name):
-		search_paths = ['.']
+	def search_file(self, filename):
+		if filename[:2] == '.'+os.sep:
+			filename = filename[2:]
+		search_paths = [os.path.abspath('.')]
 		for search_path in search_paths:
 			for dir, subdirs, subfiles in os.walk(search_path):
 				for subfile in subfiles:
-					if name == subfile:
-						return os.path.join(dir, subfile)
+					absfilepath = os.path.join(dir, subfile)
+					if absfilepath.endswith(filename):
+						return absfilepath
 		return None    	    	
 
 if __name__ == "__main__":

@@ -118,14 +118,21 @@ def m4_defn(processor, arguments) :
 	return None
 
 def m4_divert(processor, arguments) :
-	bad_args(arguments, 2, 2)
-	divnum = arguments[1]
-	processor.debug_output("m4_changequote(%s)" % divnum)
-	if divnum != '-1':
-		raise Exception("Not implemeneted yet for divnum %d" % divnum)
+	bad_args(arguments, 1, 2)
+	divnum = arguments[1] if len(arguments) > 1 else 0
+	processor.make_diversion(divnum)
 
 def m4_divnum(processor, arguments) :
-	raise Exception("Not implemeneted yet")
+	bad_args(arguments, 1, 1)
+	return str(processor.current_diversion)
+
+def m4_undivert(processor, arguments) :
+	num_args = len(arguments)
+	if num_args == 1:
+		processor.undivert_all()
+	else:
+		for i in range(1, num_args):
+			processor.undivert(arguments[i])
 
 def m4_dnl(processor, arguments) :
 	bad_args(arguments, 1, 1)
@@ -226,7 +233,7 @@ def include(processor, arguments, silent):
 		if not silent:
 			raise Exception("cannot open '%s'" % filename)
 		return None
-	processor.push_file(filepath)
+	processor.push_file(filename, filepath)
 
 # Include a file, complaining in case of errors.
 def m4_include(processor, arguments) :
@@ -296,11 +303,70 @@ def m4_maketemp(processor, arguments) :
 def m4_mkstemp(processor, arguments) :
 	raise Exception("Not implemeneted yet")
 
+def normalize_regexp(regexp):
+	regexp = regexp.replace(r'\(', '(')
+	regexp = regexp.replace(r'\)', ')')
+	regexp = regexp.replace(r'\{', '{')
+	regexp = regexp.replace(r'\}', '}')
+	return regexp
+
+def substitute(processor, text, repl, match):
+	result = ''
+	offset = 0
+	while True:
+		index  = repl.find('\\', offset)
+		if index == -1:
+			result += repl[offset:]
+			return result
+		result += repl[offset : index]
+		index += 1
+		if index < len(repl) and (repl[index].isdigit() or repl[index] == '&'):
+			if repl[index] == '&': # analog '\0'
+				i = 0
+			else:
+				i = int(repl[index])
+			if i < len(match.groups()) + 1:
+				result += text[match.start(i):match.end(i)]
+			offset = index + 1 
+		else:
+			result += '\\'
+			offset = index
+
 def m4_patsubst(processor, arguments) :
-	raise Exception("Not implemeneted yet")
+	num_args = len(arguments)
+	if not bad_args(arguments, 3, 4, False):
+		# builtin(`patsubst') is blank, but patsubst(`abc') is abc. 
+		if num_args == 2:
+			return arguments[1]
+	text = arguments[1]
+	regexp = normalize_regexp(arguments[2])
+	repl = arguments[3] if num_args > 3 else ''
+	pattern = re.compile(regexp)
+	result = ''
+	offset = 0
+	for match in pattern.finditer(text):
+		result += text[offset:match.start()]
+		result += substitute(processor, text, repl, match)
+		offset = match.end()
+	result += text[offset:]
+	return result
 
 def m4_regexp(processor, arguments) :
-	raise Exception("Not implemeneted yet")
+	num_args = len(arguments)
+	if not bad_args(arguments, 3, 4, False):
+		# builtin(`regexp') is blank, but regexp(`abc') is 0.
+		if num_args == 2:
+			return str(0)
+	text = arguments[1]
+	regexp = normalize_regexp(arguments[2])
+	pattern = re.compile(regexp)
+	match = pattern.search(text)
+	if match:
+		if num_args == 3:
+			return str(match.start())
+		else:
+			repl = arguments[3]
+			return substitute(processor, text, repl, match)
 
 def m4_shift(processor, arguments) :
 	bad_args(arguments, 2)
@@ -385,9 +451,6 @@ def m4_translit(processor, arguments) :
 		else:
 			result += symbol
 	return result
-
-def m4_undivert(processor, arguments) :
-	raise Exception("Not implemeneted yet")
 
 def m4_placeholder(processor, arguments) :
 	raise Exception("Not implemeneted yet")
