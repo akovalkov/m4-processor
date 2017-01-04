@@ -20,23 +20,27 @@ def bad_args(arguments, min = -1, max = -1, exception=True):
 	return True
 
 def m4___file__(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 1, 1)
 	current_file = processor.current_file()
 	name = current_file.name if current_file else ''
 	return processor.config['left_quote'] + name + processor.config['right_quote'] 
 
 def m4___line__(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 1, 1)
 	current_file = processor.current_file()
 	line = current_file.line if current_file else 0
 	return processor.config['left_quote'] + str(line) + processor.config['right_quote'] 
 
 def m4___program__(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 
 # change comment delimiters
 def m4_changecom(processor, arguments) : 
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 1, 3)
 	if len(arguments) > 1:
 		processor.config['begin_comment'] = arguments[1]
@@ -46,6 +50,7 @@ def m4_changecom(processor, arguments) :
 
 # change quote delimiters
 def m4_changequote(processor, arguments) : 
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 1, 3)
 	if len(arguments) > 1:
 		processor.config['left_quote'] = arguments[1]
@@ -54,12 +59,15 @@ def m4_changequote(processor, arguments) :
 	processor.debug_output("m4_changequote(%s, %s)" % (processor.config['left_quote'], processor.config['right_quote']))
 
 def m4_debugmode(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def m4_debugfile(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def m4_decr(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def define_macro(processor, arguments, mode):
@@ -80,22 +88,27 @@ def define_macro(processor, arguments, mode):
 
 
 def m4_define(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	define_macro(processor, arguments, 'insert')
 
 def m4_undefine(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 2)
 	for i in range(1, len(arguments)):
 		lookup_macro(processor.macrotab, arguments[i], 'delete')
 
 def m4_pushdef(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	define_macro(processor, arguments, 'pushdef')
 
 def m4_popdef(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 2)
 	for i in range(1, len(arguments)):
 		lookup_macro(processor.macrotab, arguments[i], 'popdef')
 
 def m4_defn(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 2)
 	for i in range(1, len(arguments)):
 		argument = arguments[1]
@@ -118,15 +131,18 @@ def m4_defn(processor, arguments) :
 	return None
 
 def m4_divert(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 1, 2)
-	divnum = arguments[1] if len(arguments) > 1 else 0
-	processor.make_diversion(divnum)
+	divnum = arguments[1] if len(arguments) > 1 else '0'
+	processor.make_diversion(divnum) # accept strings
 
 def m4_divnum(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 1, 1)
 	return str(processor.current_diversion)
 
 def m4_undivert(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	num_args = len(arguments)
 	if num_args == 1:
 		processor.undivert_all()
@@ -135,32 +151,37 @@ def m4_undivert(processor, arguments) :
 			processor.undivert(arguments[i])
 
 def m4_dnl(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 1, 1)
 	processor.skip_line()
 
 def m4_dumpdef(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def m4_errprint(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 2)
 	errmsg = arguments[1]
 	sys.stderr.write(errmsg)
 	sys.stderr.flush()
 
 def m4_esyscmd(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def m4_eval(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 2, 4)
 	eval_str = arguments[1]
-	if len(arguments) > 2:
+	if len(arguments) > 2 and arguments[2]:
 		radix = int(arguments[2])
 	else:
 		radix = 10
 	if radix != 10:
 		raise Exception("The radix support only 10")
 
-	if len(arguments) > 3:
+	if len(arguments) > 3 and arguments[3]:
 		min = int(arguments[3])
 	else:
 		min = 1
@@ -174,6 +195,7 @@ def m4_eval(processor, arguments) :
 	return "%d" % result
 
 def m4_format(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 2)
 	format_str = arguments[1]
 	# convert values to format type
@@ -188,6 +210,7 @@ def m4_format(processor, arguments) :
 	return format_str % tuple(values)
 
 def m4_ifdef(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 3, 4)
 	symbol = arguments[1]
 	# symbol is defined
@@ -200,6 +223,7 @@ def m4_ifdef(processor, arguments) :
 	return result	
 
 def m4_ifelse(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	num_arguments = len(arguments) 
 	if num_arguments == 2:
 		return None
@@ -237,19 +261,24 @@ def include(processor, arguments, silent):
 
 # Include a file, complaining in case of errors.
 def m4_include(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	include(processor, arguments, False)
 
 # Include a file, ignoring errors. 
 def m4_sinclude(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	include(processor, arguments, True)
 
 def m4_incr(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def m4_index(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def m4_indir(processor, arguments) : # indirect execute macro
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 2)
 	name = arguments[1]
 	macro = lookup_macro(processor.macrotab, name)
@@ -267,6 +296,7 @@ def m4_indir(processor, arguments) : # indirect execute macro
 # possible to redefine builtins, and still access their original   
 # definition.  This macro is not available in compatibility mode.  
 def m4_builtin(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 2)
 	name = arguments[1]
 	bp = find_builtin_by_name(name)
@@ -282,9 +312,11 @@ def m4_builtin(processor, arguments) :
 
 
 def m4_len(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def m4_m4exit(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 1, 2)
 	exitcode = 0
 	if len(arguments) > 1:
@@ -295,12 +327,15 @@ def m4_m4exit(processor, arguments) :
 	sys.exit(exitcode)
 
 def m4_m4wrap(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def m4_maketemp(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def m4_mkstemp(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def normalize_regexp(regexp):
@@ -333,6 +368,7 @@ def substitute(processor, text, repl, match):
 			offset = index
 
 def m4_patsubst(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	num_args = len(arguments)
 	if not bad_args(arguments, 3, 4, False):
 		# builtin(`patsubst') is blank, but patsubst(`abc') is abc. 
@@ -352,6 +388,7 @@ def m4_patsubst(processor, arguments) :
 	return result
 
 def m4_regexp(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	num_args = len(arguments)
 	if not bad_args(arguments, 3, 4, False):
 		# builtin(`regexp') is blank, but regexp(`abc') is 0.
@@ -369,22 +406,28 @@ def m4_regexp(processor, arguments) :
 			return substitute(processor, text, repl, match)
 
 def m4_shift(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 2)
-	return processor.dump_args(arguments[2:], True)
+	return processor.dump_args(arguments[1:], True)
 
 def m4_substr(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def m4_syscmd(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def m4_sysval(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def m4_traceoff(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def m4_traceon(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 def expand_ranges(string):
@@ -421,6 +464,7 @@ def expand_ranges(string):
 
 
 def m4_translit(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	if not bad_args(arguments, 3, 4, False):
 		#  builtin(`translit') is blank, but translit(`abc') is abc.
 		if len(arguments) <= 2:
@@ -453,6 +497,7 @@ def m4_translit(processor, arguments) :
 	return result
 
 def m4_placeholder(processor, arguments) :
+	processor.debug_builtin_call(arguments)
 	raise Exception("Not implemeneted yet")
 
 builtin_tab = [

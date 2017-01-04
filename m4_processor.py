@@ -2,63 +2,9 @@ import sys
 import os
 import argparse
 
-from m4_common import Macro, Token
+from m4_common import Macro, Token, Block
 from m4_builtin import builtin_init, define_builtin, find_builtin_by_addr
 
-class Block:
-	INPUT_STRING = 0	# String resulting from macro expansion.
-	INPUT_FILE = 1		# File from command line or include.
-	INPUT_MACRO = 2		# Builtin resulting from defn.
-
-	CHAR_EOF = "-1"   # character return on EOF 
-	CHAR_MACRO = "-2" # character return for MACRO token 
-
-	def __init__(self, type, arg1, arg2 = None):
-		self.type = type
-		self.line = 1
-		self.offset = 0
-		self.start_of_input_line = False
-		if type == self.INPUT_FILE:
-			self.name = arg1
-			self.content = self.read_file(arg2)
-		elif type == self.INPUT_STRING:
-			self.name = None
-			self.content = arg1
-		elif type == self.INPUT_MACRO:
-			self.name = None
-			self.content = arg1
-		else:
-			raise Exception("Unknown input block type %d" % type)
-
-	def read_file(self, filepath):
-		return open(filepath).read()
-
-	def next_symbol(self):
-		# check new line start
-		if self.type == self.INPUT_FILE and self.start_of_input_line:
-			self.start_of_input_line = False
-			self.line += 1 # track line number only for file
-			#print("line: %d" % self.line)
-		# check end of content
-		if self.offset >= len(self.content):
-			return self.CHAR_EOF
-		symbol = self.content[self.offset]
-		if self.type == self.INPUT_FILE and symbol == '\n': # next symbol start a new line
-			self.start_of_input_line = True
-		self.offset += 1
-		return symbol	
-
-	def peek_symbol(self, shift = 0):
-		if self.offset + shift >= len(self.content):
-			return self.CHAR_EOF
-		return self.content[self.offset + shift]
-
-	def __str__(self):
-		types = ['INPUT_STRING','INPUT_FILE','INPUT_MACRO']
-		if self.name:
-			return "%s name %s line %d" % (types[self.type - self.INPUT_STRING], self.name, self.line)
-		else:
-			return "%s line %d" % (types[self.type - self.INPUT_STRING], self.line)
 
 class M4Parser:
 	DEF_LQUOTE = "`"
@@ -115,6 +61,13 @@ class M4Parser:
 			return
 		print(msg)
 
+	def debug_builtin_call(self, args):
+		if not self.debug:
+			return
+		name = args[0]
+		arguments = args[1:]
+		self.debug_output("%s(%s)" % (name, ','.join(map(str, arguments))))
+
 	def push_file(self, filename, filepath):
 		block = Block(Block.INPUT_FILE, filename, filepath)
 		self.stack.append(block) 
@@ -122,9 +75,8 @@ class M4Parser:
 	def push_string(self, string):
 		current_block = self.current_block()
 		block = Block(Block.INPUT_STRING, string)
-		block.line = current_block.line
-		if current_block.name:
-			block.name = current_block.name
+		block.line = current_block.line if current_block else 1
+		block.name = current_block.name if current_block else None
 		self.stack.append(block) 
 
 	def push_macro(self, func):
@@ -352,8 +304,12 @@ class M4Parser:
 			raise Exception("INTERNAL ERROR: bad token type in expand_token ()")
 
 	def shipout_text(self, text, line, prev_text = None):
+		# If output goes to an obstack, merely add TEXT to it.
 		if prev_text is not None: # compose text without output
 			return prev_text + text
+		if self.current_diversion < 0:
+			return
+		# Do nothing if TEXT should be discarded.
 		if not self.config['sync_output']:
 			self.output_text(text)
 			return None
@@ -376,7 +332,7 @@ class M4Parser:
 			if symbol == '\n':
 				self.start_of_output_line = True
 		self.output_text(text)
-		return None
+		
 
 	def output_text(self, text):
 		if self.current_diversion < 0:
@@ -388,6 +344,8 @@ class M4Parser:
 		self.diversions[self.current_diversion] += text
 
 	def make_diversion(self, divnum):
+		if (divnum[0] =='-' and divnum[1:].isdigit()) or divnum.isdigit():
+			divnum = int(divnum)
 		if self.current_diversion == divnum:
 			return
 
@@ -405,15 +363,19 @@ class M4Parser:
 		for divnum, text in self.diversions.items():
 			if divnum != self.current_diversion:
 				self.output_text(text)
+				del self.diversions[divnum]
 
 	def undivert(self, divnum):
-		if self.current_diversion in self.diversions:
-			self.output_text(self.diversions[self.current_diversion])
+		if (divnum[0] =='-' and divnum[1:].isdigit()) or divnum.isdigit():
+			divnum = int(divnum)
+		if divnum in self.diversions:
+			self.output_text(self.diversions[divnum])
+			del self.diversions[divnum]
 
 	def expand_macro(self, macro):
 		block = self.current_block()
-		current_filename = block.name
-		current_line = block.line
+		current_filename = block.name if block else None
+		current_line = block.line if block else 1
 
 		macro.pending_expansions += 1
 		self.expansion_level += 1
@@ -425,6 +387,7 @@ class M4Parser:
 		arguments = self.collect_arguments(macro.name)
 		result = self.call_macro(macro, arguments)
 		if result:
+			self.debug_output("%s => %s" % (macro.name, result))
 			self.push_string(result)
 		self.expansion_level -= 1
 		macro.pending_expansions -= 1
