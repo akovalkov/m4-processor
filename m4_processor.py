@@ -15,7 +15,7 @@ class Block:
 
 	def __init__(self, type, arg1, arg2 = None):
 		self.type = type
-		self.line = 0
+		self.line = 1
 		self.offset = 0
 		self.start_of_input_line = False
 		if type == self.INPUT_FILE:
@@ -35,15 +35,15 @@ class Block:
 
 	def next_symbol(self):
 		# check new line start
-		if self.start_of_input_line:
+		if self.type == self.INPUT_FILE and self.start_of_input_line:
 			self.start_of_input_line = False
-			self.line += 1
+			self.line += 1 # track line number only for file
 			#print("line: %d" % self.line)
 		# check end of content
 		if self.offset >= len(self.content):
 			return self.CHAR_EOF
 		symbol = self.content[self.offset]
-		if symbol == '\n': # next symbol start a new line
+		if self.type == self.INPUT_FILE and symbol == '\n': # next symbol start a new line
 			self.start_of_input_line = True
 		self.offset += 1
 		return symbol	
@@ -78,7 +78,7 @@ class M4Parser:
 					   'prefix_all_builtins' : False}
 		self.config.update(config)
 		self.start_of_output_line = True
-		self.output_current_line = 0
+		self.output_current_line = -1
 		# Current recursion level in expand_macro ()
 		self.expansion_level = 0
 		# The number of the current call of expand_macro ().
@@ -120,11 +120,19 @@ class M4Parser:
 		self.stack.append(block) 
 
 	def push_string(self, string):
+		current_block = self.current_block()
 		block = Block(Block.INPUT_STRING, string)
+		block.line = current_block.line
+		if current_block.name:
+			block.name = current_block.name
 		self.stack.append(block) 
 
 	def push_macro(self, func):
+		current_block = self.current_block()
 		block = Block(Block.INPUT_MACRO, func)
+		block.line = current_block.line
+		if current_block.name:
+			block.name = current_block.name
 		self.stack.append(block) 
 
 	def current_block(self):
@@ -354,15 +362,19 @@ class M4Parser:
 			self.output_current_line += 1
 
 			if self.output_current_line != line:
-				self.output_text("#line \"%d\"\n" % line)
+				line_str = "#line %d" % line
+				if self.output_current_line < 1 and self.current_block().name:
+					line_str += " \"%s\"" % self.current_block().name
+				line_str += "\n"
+				self.output_text(line_str)
 				self.output_current_line = line
 		
 		for symbol in text:
-			if self.output_current_line:
-				self.output_current_line = False
+			if self.start_of_output_line:
+				self.start_of_output_line = False
 				self.output_current_line += 1
 			if symbol == '\n':
-				self.output_current_line = True
+				self.start_of_output_line = True
 		self.output_text(text)
 		return None
 
