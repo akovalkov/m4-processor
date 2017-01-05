@@ -3,10 +3,10 @@ import os
 import argparse
 
 from m4_common import Macro, Token, Block
-from m4_builtin import builtin_init, define_builtin, find_builtin_by_addr
+from m4_builtin import builtin_init, find_builtin_by_addr
 
 
-class M4Parser:
+class M4Processor:
 	DEF_LQUOTE = "`"
 	DEF_RQUOTE = "\'"
 	DEF_BCOMM = "#"
@@ -29,22 +29,29 @@ class M4Parser:
 		self.expansion_level = 0
 		# The number of the current call of expand_macro ().
 		self.macro_call_id = 0
-		# debug, trace
+		# my debug
 		self.debug = False
-		self.trace = True
 		# diversions ()
 		self.diversions = {}
-		self.current_diversion = 0;
+		self.current_diversion = 0
 		# Init builtin macros
 		self.init_buitlin()
+		# debug stuff
+		self.debug_level = 0
+		self.debug_file = None
+		# esycmd and syscmd 
+		# Exit code from last "syscmd" command.
+		self.returncode = 0
 	
 	def init_buitlin(self):
-		self.macrotab = builtin_init(self.config['no_gnu_extensions'], 
-									 self.config['prefix_all_builtins'])
+		self.macrostab = {}
+		builtin_init(self, self.config['no_gnu_extensions'], 
+						   self.config['prefix_all_builtins'])
+		
 
 	def find_macro_by_name(self, name):
-		if name in self.macrotab and len(self.macrotab[name]) > 0:
-			macro = self.macrotab[name][0]
+		if name in self.macrostab and len(self.macrostab[name]) > 0:
+			macro = self.macrostab[name][0]
 			if macro.type == Macro.TOKEN_DATA_TEXT:
 				return macro
 			elif macro.type == Macro.TOKEN_DATA_FUNC:
@@ -54,19 +61,6 @@ class M4Parser:
 						return None
 				return macro
 		return None
-
-
-	def debug_output(self, msg):
-		if not self.debug:
-			return
-		print(msg)
-
-	def debug_builtin_call(self, args):
-		if not self.debug:
-			return
-		name = args[0]
-		arguments = args[1:]
-		self.debug_output("%s(%s)" % (name, ','.join(map(str, arguments))))
 
 	def push_file(self, filename, filepath):
 		block = Block(Block.INPUT_FILE, filename, filepath)
@@ -172,7 +166,7 @@ class M4Parser:
 			token = Token(Token.TOKEN_CLOSE)
 		else:
 			token = Token(Token.TOKEN_SIMPLE)
-		self.debug_output("peek_token -> %s" % str(token));
+		self.debug_output("peek_token -> %s" % str(token))
 		return (token, block.line if block else 0)
 
 	def next_token(self):
@@ -384,11 +378,22 @@ class M4Parser:
 		self.macro_call_id += 1
 		my_call_id = self.macro_call_id
 
+	  	traced = (self.debug_level & self.DEBUG_TRACE_ALL) != 0 or macro.traced
+		if traced and (self.debug_level & self.DEBUG_TRACE_CALL) != 0:
+			self.trace_prepre(macro.name, my_call_id)
+
 		arguments = self.collect_arguments(macro.name)
+		if traced:
+			self.trace_pre(macro.name, my_call_id, arguments)
+
 		result = self.call_macro(macro, arguments)
 		if result:
 			self.debug_output("%s => %s" % (macro.name, result))
 			self.push_string(result)
+		
+		if traced:
+			self.trace_post(macro.name, my_call_id, len(arguments), result)
+
 		self.expansion_level -= 1
 		macro.pending_expansions -= 1
 
@@ -480,7 +485,9 @@ class M4Parser:
 			return sep.join(real_arguments)
 
 	def search_file(self, filename):
-		if filename[:2] == '.'+os.sep:
+		if os.path.isabs(filename):
+			return filename
+		if filename[:2] == '.' + os.sep:
 			filename = filename[2:]
 		search_paths = [os.path.abspath('.')]
 		for search_path in search_paths:
@@ -489,7 +496,244 @@ class M4Parser:
 					absfilepath = os.path.join(dir, subfile)
 					if absfilepath.endswith(filename):
 						return absfilepath
-		return None    	    	
+		return None    	
+
+	def define_user_macro(self, name, text, mode = "insert"):
+		macro = Macro()
+		macro.name = name
+		macro.type = Macro.TOKEN_DATA_TEXT
+		macro.data = text
+		if mode == "insert":
+			self.macrostab[macro.name] = [macro]
+		elif mode == "pushdef":
+			if macro.name not in self.macrostab:
+				self.macrostab[macro.name] = []
+			self.macrostab[macro.name].insert(0, macro)
+		else:
+			raise Exception("Unknown mode '%s' for macro insertion" % mode)
+
+	# mode is INSERT or PUSHDEF
+	def define_builtin(self, name, func, groks_macro_args, blind_if_no_args, mode = "insert"):
+		macro = Macro()
+		macro.name = name
+		macro.macro_args = groks_macro_args
+		macro.blind_no_args = blind_if_no_args
+		macro.type = Macro.TOKEN_DATA_FUNC
+		macro.data = func
+		if mode == "insert":
+			self.macrostab[macro.name] = [macro]
+		elif mode == "pushdef":
+			if macro.name not in macrostab:
+				self.macrostab[macro.name] = []
+			self.macrostab[macro.name].insert(0, macro)
+		else:
+			raise Exception("Unknown mode '%s' for macro insertion" % mode)
+
+
+	def lookup_macro(self, name, mode = 'lookup'):
+		if name not in self.macrostab:
+			return None
+		if mode == 'lookup':
+			return self.macrostab[name][0]
+		elif mode == 'delete':
+			self.macrostab[name].pop(0)
+			if len(self.macrostab[name]) == 0:
+				del self.macrostab[name]	
+		elif mode == 'popdef':
+			del self.macrostab[name]
+		return None
+
+ 	# debug stuff
+
+	# The value of debug_level is a bitmask of the following.
+
+	# a: show arglist in trace output 
+	DEBUG_TRACE_ARGS = 1
+	# e: show expansion in trace output 
+	DEBUG_TRACE_EXPANSION = 2
+	# q: quote args and expansion in trace output 
+	DEBUG_TRACE_QUOTE = 4
+	# t: trace all macros -- overrides trace{on,off}
+	DEBUG_TRACE_ALL = 8
+	# l: add line numbers to trace output
+	DEBUG_TRACE_LINE = 16
+	# f: add file name to trace output 
+	DEBUG_TRACE_FILE = 32
+	# p: trace path search of include files 
+	DEBUG_TRACE_PATH = 64
+	# c: show macro call before args collection 
+	DEBUG_TRACE_CALL = 128
+	# i: trace changes of input files 
+	DEBUG_TRACE_INPUT = 256
+	# x: add call id to trace output 
+	DEBUG_TRACE_CALLID = 512
+	# V: very verbose --  print everything 
+	DEBUG_TRACE_VERBOSE = 1023
+	# default flags -- equiv: aeq 
+	DEBUG_TRACE_DEFAULT = 7
+
+	def debug_decode(self, opts):
+		if opts is None or len(opts) == 0:
+			level = self.DEBUG_TRACE_DEFAULT
+  		else:
+  			level = 0
+  			for opt in opts:
+  				if opt == 'a':
+					level |= self.DEBUG_TRACE_ARGS
+				elif opt == 'e':
+					level |= self.DEBUG_TRACE_EXPANSION
+				elif opt == 'q':
+					level |= self.DEBUG_TRACE_QUOTE
+				elif opt == 't':
+					level |= self.DEBUG_TRACE_ALL
+				elif opt == 'l':
+					level |= self.DEBUG_TRACE_LINE
+				elif opt == 'f':
+					level |= self.DEBUG_TRACE_FILE
+				elif opt == 'p':
+					level |= self.DEBUG_TRACE_PATH
+				elif opt == 'c':
+					level |= self.DEBUG_TRACE_CALL
+				elif opt == 'i':
+					level |= self.DEBUG_TRACE_INPUT
+				elif opt == 'x':
+					level |= self.DEBUG_TRACE_CALLID
+				elif opt == 'V':
+					level |= self.DEBUG_TRACE_VERBOSE
+				else:
+					return -1
+  		return level
+
+  	def set_debug_level(self, opts = None):
+  		if opts is None:
+  			self.debug_level = 0
+  			return
+
+  		if opts[0] == '-' or opts[0] == '+':
+  			change_flag = opts[0]
+  			new_debug_level = self.debug_decode(opts[1:])
+  		else:
+  			change_flag = 0
+  			new_debug_level = self.debug_decode(opts)
+
+  		if new_debug_level < 0:
+  			raise Exception("Debugmode: bad debug flags: '%s'" % opts)
+
+  		if change_flag == 0:
+  			self.debug_level = new_debug_level
+  		elif change_flag == '+':
+  			self.debug_level |= new_debug_level
+  		elif change_flag == '-':
+  			self.debug_level &= ~new_debug_level
+  		else: 
+  			raise Exception("INTERNAL ERROR: bad flag in m4_debugmode ()")
+
+  	def debug_set_output(self, filename = None):
+  		self.debug_file = filename
+
+  	def debug_print(self, msg):
+  		msg = msg + "\n"
+  		if self.debug_file is None:
+			sys.stderr.write(msg)
+			sys.stderr.flush()
+		else:
+			open(self.debug_file, "a").write(msg)
+
+ 	def dump_all_macros(self):
+ 		# dump all macros
+ 		for name in sorted(self.macrostab):
+ 			self.dump_macro(name)
+
+ 	def dump_macro(self, macro_name):
+  		if macro_name not in self.macrostab:
+  			return
+  		macro = self.macrostab[macro_name][0]
+  		output_str = '%s:\t' % macro.name
+  		if macro.type == Macro.TOKEN_DATA_TEXT:
+  			if (self.debug_level & self.DEBUG_TRACE_QUOTE) != 0:
+  				output_str += '%s%s%s\n' % (self.config['left_quote'], macro.data, self.config['right_quote'])
+  			else:
+  				output_str += '%s\n' % macro.data
+  		elif macro.type == Macro.TOKEN_DATA_FUNC:
+			builtin = find_builtin_by_addr(macro.name)
+			if not builtin:
+				raise Exception('INTERNAL ERROR: builtin not found in builtin table')
+			output_str += '<%s>' % builtin(0) # builtin name
+		else:
+			raise Exception('INTERNAL ERROR: bad token data type in m4_dumpdef ()')
+
+
+  	def set_trace(self, macro_name, flag):
+  		if macro_name is None:
+  			# trace/untrace all macros
+  			for name, macros in self.macrostab.items():
+  				macros[0].traced = flag
+  		elif macro_name in self.macrostab:
+  			# trace/untrace specific macro
+  			self.macrostab[macro_name][0].traced = flag
+
+  	def trace_header(self, id):
+  		header_str = 'm4trace:'
+  		block = self.current_block()
+  		if block and block.line:
+  			if block.name and (self.debug_level & self.DEBUG_TRACE_FILE) != 0:
+  				header_str += '%s:' % block.name
+  			if (self.debug_level & self.DEBUG_TRACE_LINE) != 0:
+  				header_str += '%d' % block.line
+  		header_str += ' -%d- ' % self.expansion_level
+  		if (self.debug_level & self.DEBUG_TRACE_CALLID) != 0:
+			header_str += 'id %d: ' % id
+		return header_str
+
+  	def trace_prepre(self, name, id):
+  		output_str = self.trace_header(id)
+  		output_str += '%s ...' % name
+  		self.debug_print(output_str)
+
+  	def trace_pre(self, name, id, arguments):
+  		output_str = self.trace_header(id)
+  		output_str += '%s' % name
+  		num_args = len(arguments)
+  		if num_args > 1 and (self.debug_level & self.DEBUG_TRACE_ARGS) != 0:
+  			output_str += '('
+  			for i in range(1, num_args):
+  				if i != 1:
+  					output_str += ', '
+  				if isinstance(arguments[i], (str, unicode)):
+  					output_str += '%s%s%s' % (self.config['left_quote'], arguments[i], self.config['right_quote'])
+  				else:
+  					builtin = find_builtin_by_addr(arguments[i])
+  					if not builtin:
+  						raise Exception('INTERNAL ERROR: builtin not found in builtin table! (trace_pre ())')
+  					output_str += '<%s>' % builtin(0) # builtin name
+  			output_str += ')'
+	  	if (self.debug_level & self.DEBUG_TRACE_CALL) != 0:
+	  		output_str += ' -> ???'
+  			self.debug_print(output_str)
+
+  	def trace_post(self, name, id, num_args, expanded):
+  		output_str = ''
+  		if (self.debug_level & self.DEBUG_TRACE_CALL) != 0:
+  			output_str = self.trace_header(id)
+  			output_str += '%s' % name
+  			if num_args > 1:
+  				output_str += '(...)'
+		if expanded and (self.debug_level & self.DEBUG_TRACE_EXPANSION) != 0:
+			output_str += ' -> %s%s%s' % (self.config['left_quote'], expanded, self.config['right_quote'])
+		self.debug_print(output_str)
+
+	# my debug stuff	
+	def debug_output(self, msg):
+		if not self.debug:
+			return
+		print(msg)
+
+	def debug_builtin_call(self, args):
+		if not self.debug:
+			return
+		name = args[0]
+		arguments = args[1:]
+		self.debug_output("%s(%s)" % (name, ','.join(map(str, arguments))))
 
 if __name__ == "__main__":
 
@@ -501,6 +745,6 @@ if __name__ == "__main__":
     if not options.source or not os.path.exists(options.source):
         sys.exit('Please specify source file: -s')
 
-    m4 = M4Parser()
+    m4 = M4Processor()
     m4.process_file(options.source)
 

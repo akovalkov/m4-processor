@@ -1,6 +1,7 @@
 import sys
 import os
 import re
+import subprocess
 
 from m4_common import Macro, Token
 
@@ -60,31 +61,69 @@ def m4_changequote(processor, arguments) :
 
 def m4_debugmode(processor, arguments) :
 	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
+	bad_args(arguments, 1, 2)
+	if len(arguments) > 1:
+		processor.set_debug_level(arguments[1])
+	else:
+		processor.set_debug_level()
 
 def m4_debugfile(processor, arguments) :
 	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
+	bad_args(arguments, 1, 2)
+	if len(arguments) > 1:
+		processor.debug_set_output(arguments[1])
+	else:
+		processor.debug_set_output()
+
+def m4_traceoff(processor, arguments) :
+	processor.debug_builtin_call(arguments)
+	num_args = len(arguments)
+	if num_args == 1:
+		processor.set_trace(None, False)
+	else:
+		for i in range(1, num_args):
+			processor.set_trace(arguments[i], False)
+
+
+def m4_traceon(processor, arguments) :
+	processor.debug_builtin_call(arguments)
+	num_args = len(arguments)
+	if num_args == 1:
+		processor.set_trace(None, True)
+	else:
+		for i in range(1, num_args):
+			processor.set_trace(arguments[i], True)
+
 
 def m4_decr(processor, arguments) :
 	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
+	bad_args(arguments, 2, 2)
+	num_value = int(arguments[1])
+	num_value -= 1
+	return str(num_value)
+
+def m4_incr(processor, arguments) :
+	processor.debug_builtin_call(arguments)
+	bad_args(arguments, 2, 2)
+	num_value = int(arguments[1])
+	num_value += 1
+	return str(num_value)
 
 def define_macro(processor, arguments, mode):
 	bad_args(arguments, 2, 3)
 	macro_name = arguments[1]
 
 	if len(arguments) == 2:
-		define_user_macro(processor.macrotab, macro_name, "", mode)
+		processor.define_user_macro(macro_name, "", mode)
 		return
 	macro_body = arguments[2]
 	if callable(macro_body): # builtin macro
 		bp = find_builtin_by_addr(macro_body)
 		if bp:
 			(dummy, gnu_extension, groks_macro_args, blind_if_no_args, func) = bp
-			define_builtin(processor.macrotab, macro_name, func, groks_macro_args, blind_if_no_args, mode)
+			processor.define_builtin(macro_name, func, groks_macro_args, blind_if_no_args, mode)
 	else: # text macro
-		define_user_macro(processor.macrotab, macro_name, macro_body, mode)
+		processor.define_user_macro(macro_name, macro_body, mode)
 
 
 def m4_define(processor, arguments) :
@@ -95,7 +134,7 @@ def m4_undefine(processor, arguments) :
 	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 2)
 	for i in range(1, len(arguments)):
-		lookup_macro(processor.macrotab, arguments[i], 'delete')
+		processor.lookup_macro(arguments[i], 'delete')
 
 def m4_pushdef(processor, arguments) :
 	processor.debug_builtin_call(arguments)
@@ -105,14 +144,14 @@ def m4_popdef(processor, arguments) :
 	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 2)
 	for i in range(1, len(arguments)):
-		lookup_macro(processor.macrotab, arguments[i], 'popdef')
+		processor.lookup_macro(arguments[i], 'popdef')
 
 def m4_defn(processor, arguments) :
 	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 2)
 	for i in range(1, len(arguments)):
 		argument = arguments[1]
-		macro = lookup_macro(processor.macrotab, argument)
+		macro = processor.lookup_macro(argument)
 		if macro is None:
 			continue
 		if macro.type == Macro.TOKEN_DATA_TEXT:
@@ -155,20 +194,12 @@ def m4_dnl(processor, arguments) :
 	bad_args(arguments, 1, 1)
 	processor.skip_line()
 
-def m4_dumpdef(processor, arguments) :
-	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
-
 def m4_errprint(processor, arguments) :
 	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 2)
 	errmsg = arguments[1]
 	sys.stderr.write(errmsg)
 	sys.stderr.flush()
-
-def m4_esyscmd(processor, arguments) :
-	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
 
 def m4_eval(processor, arguments) :
 	processor.debug_builtin_call(arguments)
@@ -269,19 +300,11 @@ def m4_sinclude(processor, arguments) :
 	processor.debug_builtin_call(arguments)
 	include(processor, arguments, True)
 
-def m4_incr(processor, arguments) :
-	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
-
-def m4_index(processor, arguments) :
-	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
-
 def m4_indir(processor, arguments) : # indirect execute macro
 	processor.debug_builtin_call(arguments)
 	bad_args(arguments, 2)
 	name = arguments[1]
-	macro = lookup_macro(processor.macrotab, name)
+	macro = processor.lookup_macro(name)
 	if macro is None or macro.type == Macro.TOKEN_DATA_VOID:
 		raise Exception("Undefined macro '%s'" % name)
 	sub_arguments = list(arguments[1:])
@@ -310,10 +333,39 @@ def m4_builtin(processor, arguments) :
 				sub_arguments[i] = ""
 	func(processor, sub_arguments)
 
+def m4_index(processor, arguments) :
+	processor.debug_builtin_call(arguments)
+	bad_args(arguments, 3, 3)
+	haystack = arguments[1]
+	string = arguments[2] 
+	result = string.find(haystack)
+	return str(result)
 
 def m4_len(processor, arguments) :
 	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
+	bad_args(arguments, 2, 2)
+	length = len(arguments[1])
+	return str(length)
+
+def m4_substr(processor, arguments) :
+	processor.debug_builtin_call(arguments)
+	num_args = len(arguments)
+	if not bad_args(arguments, 3, 4, False):
+		if num_args == 2:
+			# builtin(`substr') is blank, but substr(`abc') is abc. 
+			return argument[1]
+	string = argument[1]
+	start = int(argument[2])
+	if start < 0 or start >= len(string):
+		return
+	if num_args > 3:
+		length = int(argument[3])
+		if length <= 0 or start + length >= len(string):
+			return
+		end = start + length
+		return string[start:end]
+	else:
+		return string[start:]
 
 def m4_m4exit(processor, arguments) :
 	processor.debug_builtin_call(arguments)
@@ -325,18 +377,6 @@ def m4_m4exit(processor, arguments) :
 	sys.stdout.flush()
 	sys.stderr.flush()
 	sys.exit(exitcode)
-
-def m4_m4wrap(processor, arguments) :
-	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
-
-def m4_maketemp(processor, arguments) :
-	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
-
-def m4_mkstemp(processor, arguments) :
-	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
 
 def normalize_regexp(regexp):
 	regexp = regexp.replace(r'\(', '(')
@@ -410,26 +450,6 @@ def m4_shift(processor, arguments) :
 	bad_args(arguments, 2)
 	return processor.dump_args(arguments[1:], True)
 
-def m4_substr(processor, arguments) :
-	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
-
-def m4_syscmd(processor, arguments) :
-	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
-
-def m4_sysval(processor, arguments) :
-	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
-
-def m4_traceoff(processor, arguments) :
-	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
-
-def m4_traceon(processor, arguments) :
-	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
-
 def expand_ranges(string):
 	from_symbol = None
 	to_symbol = None
@@ -495,6 +515,63 @@ def m4_translit(processor, arguments) :
 		else:
 			result += symbol
 	return result
+
+def m4_dumpdef(processor, arguments) :
+	processor.debug_builtin_call(arguments)
+	num_args = len(arguments)
+	if num_args == 1:
+		processor.dump_all_macros()
+	else:
+		for i in range(1, num_args):
+			processor.dump_macro(arguments[i])
+
+def m4_m4wrap(processor, arguments) :
+	processor.debug_builtin_call(arguments)
+	bad_args(arguments, 2)
+	if processor.config['no_gnu_extensions']:
+		return arguments[1]
+	else:
+		return  processor.dump_args(arguments[1:], False, ' ')
+
+
+def m4_esyscmd(processor, arguments) :
+	processor.debug_builtin_call(arguments)
+	if not bad_args(arguments, 2, 2, False):
+		#  The empty command is successful.
+		processor.returncode = 0
+		return
+	try:
+		# original version of the 'esyscmd', it doesn't return error in stdout
+		# processor.returncode = subprocess.check_output(arguments[1], shell=True)
+		output = subprocess.check_output(arguments[1], stderr=subprocess.STDOUT, shell=True)
+		processor.returncode = 0
+	except subprocess.CalledProcessError as e:
+		processor.returncode = e.returncode
+		output = e.output
+	return output
+
+def m4_syscmd(processor, arguments) :
+	processor.debug_builtin_call(arguments)
+	if not bad_args(arguments, 2, 2, False):
+		#  The empty command is successful.
+		processor.returncode = 0
+		return
+	try:
+		processor.returncode = subprocess.check_call(arguments[1], shell=True)
+	except subprocess.CalledProcessError as e:
+		processor.returncode = e.returncode
+
+def m4_sysval(processor, arguments) :
+	processor.debug_builtin_call(arguments)
+	return str(processor.returncode)
+
+def m4_maketemp(processor, arguments) :
+	processor.debug_builtin_call(arguments)
+	raise Exception("Not implemeneted yet")
+
+def m4_mkstemp(processor, arguments) :
+	processor.debug_builtin_call(arguments)
+	raise Exception("Not implemeneted yet")
 
 def m4_placeholder(processor, arguments) :
 	processor.debug_builtin_call(arguments)
@@ -569,72 +646,21 @@ def find_builtin_by_addr(func_addr):
 	return None
 
 
-def define_user_macro(macros_tab, name, text, mode = "insert"):
-	macro = Macro()
-	macro.name = name
-	macro.type = Macro.TOKEN_DATA_TEXT
-	macro.data = text
-	if mode == "insert":
-		macros_tab[macro.name] = [macro]
-	elif mode == "pushdef":
-		if macro.name not in macros_tab:
-			macros_tab[macro.name] = []
-		macros_tab[macro.name].insert(0, macro)
-	else:
-		raise Exception("Unknown mode '%s' for macro insertion" % mode)
-
-
-# mode is INSERT or PUSHDEF
-def define_builtin(macros_tab, name, func, groks_macro_args, blind_if_no_args, mode = "insert"):
-	macro = Macro()
-	macro.name = name
-	macro.macro_args = groks_macro_args
-	macro.blind_no_args = blind_if_no_args
-	macro.type = Macro.TOKEN_DATA_FUNC
-	macro.data = func
-	if mode == "insert":
-		macros_tab[macro.name] = [macro]
-	elif mode == "pushdef":
-		if macro.name not in macros_tab:
-			macros_tab[macro.name] = []
-		macros_tab[macro.name].insert(0, macro)
-	else:
-		raise Exception("Unknown mode '%s' for macro insertion" % mode)
-
-def lookup_macro(macros_tab, name, mode = 'lookup'):
-	if name not in macros_tab:
-		return None
-	if mode == 'lookup':
-		return macros_tab[name][0]
-	elif mode == 'delete':
-		macros_tab[name].pop(0)
-		if len(macros_tab[name]) == 0:
-			del macros_tab[name]	
-	elif mode == 'popdef':
-		del macros_tab[name]
-	return None
-
-
-def builtin_init(no_gnu_extensions = False, prefix_all_builtins = False):
-	macros_tab = {}
+def builtin_init(processor, no_gnu_extensions = False, prefix_all_builtins = False):
 	# builtin
 	for name, gnu_extension, groks_macro_args, blind_if_no_args, func in builtin_tab:
 		if no_gnu_extensions and gnu_extension:
 			continue
 		if prefix_all_builtins:
 			name = "m4_" + name
-		define_builtin(macros_tab, name, func, groks_macro_args, blind_if_no_args)
+		processor.define_builtin(name, func, groks_macro_args, blind_if_no_args)
 	# defines
 	for unix_name, gnu_name, func in predefined_tab:
 		if no_gnu_extensions:
 			if unix_name:
-				define_user_macro(macros_tab, unix_name, func)
+				processor.define_user_macro(unix_name, func)
 		else:
 			if gnu_name:
-				define_user_macro(macros_tab, gnu_name, func)
-
-	return macros_tab
+				processor.define_user_macro(gnu_name, func)
 
 
-if __name__ == "__main__":
-	macros_tab = builtin_init()

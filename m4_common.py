@@ -10,6 +10,7 @@ class Macro:
         self.data = None
         self.name = ''
         self.pending_expansions = 0
+        self.traced = False
 
     def call(self, processor, args):
         if self.type != self.TOKEN_DATA_FUNC:
