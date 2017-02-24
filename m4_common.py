@@ -1,5 +1,5 @@
 
-class Macro:
+class Macro(object):
     # The data for a token, a macro argument, and a macro definition.
     TOKEN_DATA_VOID = 10
     TOKEN_DATA_TEXT = 11
@@ -9,6 +9,7 @@ class Macro:
         self.type = self.TOKEN_DATA_VOID
         self.data = None
         self.name = ''
+        self.help = ''
         self.pending_expansions = 0
         self.traced = False
 
@@ -17,7 +18,7 @@ class Macro:
             raise Exception("Macro '%s' isn't function " % self.name)
         return self.data(processor, args)
 
-class Token:
+class Token(object):
     # Various different token types.
     TOKEN_EOF = 0     # end of file 
     TOKEN_STRING = 1    # a quoted string or comment 
@@ -45,7 +46,7 @@ class Token:
             return "%s (%s)" % (types[self.type - self.TOKEN_EOF], self.data)
 
 
-class Block:
+class Block(object):
     INPUT_STRING = 0    # String resulting from macro expansion.
     INPUT_FILE = 1      # File from command line or include.
     INPUT_MACRO = 2     # Builtin resulting from defn.

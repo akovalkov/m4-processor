@@ -2,6 +2,7 @@ import sys
 import os
 import re
 import subprocess
+from tempfile import NamedTemporaryFile
 
 from m4_common import Macro, Token
 
@@ -565,13 +566,19 @@ def m4_sysval(processor, arguments) :
 	processor.debug_builtin_call(arguments)
 	return str(processor.returncode)
 
+def mkstemp_helper(processor, macro_name, pattern):
+	pattern = pattern.rstrip('X')
+	return processor.config['left_quote'] + NamedTemporaryFile(prefix=pattern).name + processor.config['right_quote']
+
 def m4_maketemp(processor, arguments) :
 	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
+	bad_args(arguments, 2, 2)
+	return mkstemp_helper(processor, arguments[0], arguments[1])
 
 def m4_mkstemp(processor, arguments) :
 	processor.debug_builtin_call(arguments)
-	raise Exception("Not implemeneted yet")
+	bad_args(arguments, 2, 2)
+	return mkstemp_helper(processor, arguments[0], arguments[1])
 
 def m4_placeholder(processor, arguments) :
 	processor.debug_builtin_call(arguments)

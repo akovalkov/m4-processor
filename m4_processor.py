@@ -6,7 +6,7 @@ from m4_common import Macro, Token, Block
 from m4_builtin import builtin_init, find_builtin_by_addr
 
 
-class M4Processor:
+class M4Processor(object):
 	DEF_LQUOTE = "`"
 	DEF_RQUOTE = "\'"
 	DEF_BCOMM = "#"
@@ -34,14 +34,16 @@ class M4Processor:
 		# diversions ()
 		self.diversions = {}
 		self.current_diversion = 0
-		# Init builtin macros
-		self.init_buitlin()
 		# debug stuff
 		self.debug_level = 0
 		self.debug_file = None
 		# esycmd and syscmd 
 		# Exit code from last "syscmd" command.
 		self.returncode = 0
+		# doc comments
+		self.comments = []
+		# Init builtin macros
+		self.init_buitlin()
 	
 	def init_buitlin(self):
 		self.macrostab = {}
@@ -286,6 +288,12 @@ class M4Processor:
 			return None # nothing to do
 		elif token.type in [Token.TOKEN_OPEN, Token.TOKEN_COMMA, 
 						Token.TOKEN_CLOSE, Token.TOKEN_SIMPLE, Token.TOKEN_STRING]:
+			# check comment
+			if token.type == Token.TOKEN_SIMPLE and token.data == '\n':
+				self.comments = []
+			elif token.type == Token.TOKEN_STRING and token.data.startswith(self.config['begin_comment']):
+				s = token.data[len(self.config['begin_comment']) : -len(self.config['end_comment'])]
+				self.comments.append(s)
 			return self.shipout_text(token.data, line, prev_text)
 		elif token.type == Token.TOKEN_WORD:
 			macro = self.find_macro_by_name(token.data)
@@ -503,6 +511,10 @@ class M4Processor:
 		macro.name = name
 		macro.type = Macro.TOKEN_DATA_TEXT
 		macro.data = text
+		# add usage help based on comments before macro definition
+		if len(self.comments) > 0:
+			macro.help = '\n'.join(self.comments)
+			self.comments = []
 		if mode == "insert":
 			self.macrostab[macro.name] = [macro]
 		elif mode == "pushdef":
